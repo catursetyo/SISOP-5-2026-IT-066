@@ -154,9 +154,18 @@ echo
 
 cd /root || cd /
 if command -v setsid >/dev/null 2>&1 && command -v cttyhack >/dev/null 2>&1; then
-  exec setsid cttyhack sh -l
+  setsid cttyhack sh -l
+else
+  sh -l < /dev/console > /dev/console 2>&1
 fi
-exec sh -l
+
+echo
+echo "Shell exited. Powering off..."
+poweroff -f 2>/dev/null || reboot -f 2>/dev/null || true
+
+while true; do
+  sleep 3600
+done
 EOF_INIT
   chmod 0755 "$ROOTFS_DIR/init"
 
