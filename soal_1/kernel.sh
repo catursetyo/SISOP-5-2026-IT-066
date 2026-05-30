@@ -18,6 +18,13 @@ fi
 
 cd "$LINUX"
 
+if grep -Fq 'seq_printf(sf, "%s %u\n", dname, iocg->cfg_weight / WEIGHT_ONE);' block/blk-iocost.c; then
+  sed -i \
+    -e 's|seq_printf(sf, "%s %u\\n", dname, iocg->cfg_weight / WEIGHT_ONE);|seq_printf(sf, "%s %u\\n", dname, (unsigned int)(iocg->cfg_weight / WEIGHT_ONE));|' \
+    -e 's|seq_printf(sf, "default %u\\n", iocc->dfl_weight / WEIGHT_ONE);|seq_printf(sf, "default %u\\n", (unsigned int)(iocc->dfl_weight / WEIGHT_ONE));|' \
+    block/blk-iocost.c
+fi
+
 make defconfig
 
 # for initramfs boot
@@ -42,8 +49,18 @@ make defconfig
 
 ./scripts/config --enable FUSE_FS
 
-# avoid openSSL/certificate build error on modern fedora
+# avoid openSSL/certificate build error on modern Fedora
+./scripts/config --disable MODULES
 ./scripts/config --disable MODULE_SIG
+./scripts/config --disable MODULE_SIG_ALL
+./scripts/config --disable MODULE_SIG_FORMAT
+
+./scripts/config --disable KEYS
+./scripts/config --disable ASYMMETRIC_KEY_TYPE
+./scripts/config --disable X509_CERTIFICATE_PARSER
+./scripts/config --disable PKCS7_MESSAGE_PARSER
+./scripts/config --disable PKCS8_PRIVATE_KEY_PARSER
+
 ./scripts/config --disable SYSTEM_TRUSTED_KEYRING
 ./scripts/config --disable SECONDARY_TRUSTED_KEYRING
 ./scripts/config --disable SYSTEM_BLACKLIST_KEYRING
@@ -51,11 +68,17 @@ make defconfig
 ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
 ./scripts/config --set-str SYSTEM_REVOCATION_KEYS ""
 
+./scripts/config --disable INTEGRITY
+./scripts/config --disable IMA
+./scripts/config --disable EVM
 ./scripts/config --disable DEBUG_INFO_BTF
+./scripts/config --disable WERROR
 
 make olddefconfig
 
-# force gcc to use gnu11 instead of c23
+echo "[INFO] Checking certificate/keyring-related configs..."
+grep -E 'WERROR|MODULE_SIG|SYSTEM_TRUSTED|SYSTEM_REVOCATION|SYSTEM_BLACKLIST|ASYMMETRIC|X509|PKCS7|KEYS|INTEGRITY|IMA|EVM' .config || true
+
 make CC="gcc -std=gnu11" HOSTCC="gcc -std=gnu11" -j"$(nproc)" bzImage
 
 cp arch/x86/boot/bzImage "$OUT/bzImage"
