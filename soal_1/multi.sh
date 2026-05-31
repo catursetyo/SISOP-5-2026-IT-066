@@ -90,12 +90,182 @@ create_rootfs() {
     "$ROOTFS_DIR/sys" \
     "$ROOTFS_DIR/tmp" \
     "$ROOTFS_DIR/root" \
+    "$ROOTFS_DIR/var/lib/party/repo" \
+    "$ROOTFS_DIR/var/lib/party/installed" \
     "$ROOTFS_DIR/home/henn" \
     "$ROOTFS_DIR/home/hann" \
     "$ROOTFS_DIR/home/viii" \
     "$ROOTFS_DIR/home/kids"
 
   cp "$BUSYBOX_BIN" "$ROOTFS_DIR/bin/busybox"
+
+  cat > "$ROOTFS_DIR/bin/party" <<'EOF_PARTY'
+#!/bin/sh
+DB_DIR=/var/lib/party
+REPO="${PARTY_REPO:-file:///var/lib/party/repo}"
+
+usage() {
+  cat <<EOF_USAGE
+party package manager
+
+usage:
+  party list
+  party installed
+  party install <package>
+  party remove <package>
+
+Set PARTY_REPO to file://, http://, or https:// repository path.
+HTTPS downloads use wget --no-check-certificate.
+EOF_USAGE
+}
+
+repo_path_for() {
+  pkg="$1"
+  case "$REPO" in
+    file://*) printf '%s/%s.tar\n' "${REPO#file://}" "$pkg" ;;
+    http://*|https://*) printf '%s/%s.tar\n' "${REPO%/}" "$pkg" ;;
+    *) printf '%s/%s.tar\n' "${REPO%/}" "$pkg" ;;
+  esac
+}
+
+need_root() {
+  if [ "$(id -u)" != "0" ]; then
+    echo "party: install/remove requires root" >&2
+    exit 1
+  fi
+}
+
+fetch_package() {
+  pkg="$1"
+  out="$2"
+  src="$(repo_path_for "$pkg")"
+
+  case "$REPO" in
+    http://*|https://*) wget --no-check-certificate -O "$out" "$src" ;;
+    *) cp "$src" "$out" ;;
+  esac
+}
+
+list_available() {
+  case "$REPO" in
+    http://*|https://*)
+      echo "party: remote listing is not available; install by package name"
+      ;;
+    file://*) repo_dir="${REPO#file://}" ;;
+    *) repo_dir="$REPO" ;;
+  esac
+
+  [ -n "${repo_dir:-}" ] || return 0
+  found=0
+  for pkg in "$repo_dir"/*.tar; do
+    [ -e "$pkg" ] || continue
+    basename "$pkg" .tar
+    found=1
+  done
+  [ "$found" -eq 1 ] || echo "party: no packages available"
+}
+
+list_installed() {
+  found=0
+  for pkg in "$DB_DIR"/installed/*.list; do
+    [ -e "$pkg" ] || continue
+    basename "$pkg" .list
+    found=1
+  done
+  [ "$found" -eq 1 ] || echo "party: no packages installed"
+}
+
+install_package() {
+  need_root
+  pkg="${1:-}"
+  if [ -z "$pkg" ]; then
+    usage
+    exit 1
+  fi
+
+  mkdir -p "$DB_DIR/installed"
+  if [ -f "$DB_DIR/installed/$pkg.list" ]; then
+    echo "party: $pkg is already installed"
+    return 0
+  fi
+
+  archive="/tmp/party-$pkg-$$.tar"
+  list="/tmp/party-$pkg-$$.list"
+
+  if ! fetch_package "$pkg" "$archive"; then
+    rm -f "$archive" "$list"
+    echo "party: package not found: $pkg" >&2
+    exit 1
+  fi
+
+  if ! tar -tf "$archive" >/dev/null 2>&1; then
+    rm -f "$archive" "$list"
+    echo "party: invalid package archive: $pkg" >&2
+    exit 1
+  fi
+
+  tar -tf "$archive" | sed 's#^\./##' | grep -v '^$' | grep -v '/$' > "$list"
+  if ! tar -xf "$archive" -C /; then
+    rm -f "$archive" "$list"
+    echo "party: failed to install: $pkg" >&2
+    exit 1
+  fi
+
+  cp "$list" "$DB_DIR/installed/$pkg.list"
+  rm -f "$archive" "$list"
+  echo "[OK] installed $pkg"
+}
+
+remove_package() {
+  need_root
+  pkg="${1:-}"
+  if [ -z "$pkg" ]; then
+    usage
+    exit 1
+  fi
+
+  list="$DB_DIR/installed/$pkg.list"
+  if [ ! -f "$list" ]; then
+    echo "party: $pkg is not installed" >&2
+    exit 1
+  fi
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rm -f "/$path"
+  done < "$list"
+
+  rm -f "$list"
+  echo "[OK] removed $pkg"
+}
+
+case "${1:-}" in
+  list) list_available ;;
+  installed) list_installed ;;
+  install) shift; install_package "${1:-}" ;;
+  remove) shift; remove_package "${1:-}" ;;
+  -h|--help|help|"") usage ;;
+  *)
+    echo "party: unknown command: $1" >&2
+    usage
+    exit 1
+    ;;
+esac
+EOF_PARTY
+  chmod 0755 "$ROOTFS_DIR/bin/party"
+
+  need_cmd tar
+  PARTY_PKG_DIR="$BUILD_DIR/party-hello"
+  rm -rf "$PARTY_PKG_DIR"
+  mkdir -p "$PARTY_PKG_DIR/bin"
+  cat > "$PARTY_PKG_DIR/bin/hello" <<'EOF_HELLO'
+#!/bin/sh
+echo "Hello from a package installed by party."
+EOF_HELLO
+  chmod 0755 "$PARTY_PKG_DIR/bin/hello"
+  tar --owner=0 --group=0 --numeric-owner -cf \
+    "$ROOTFS_DIR/var/lib/party/repo/hello.tar" \
+    -C "$PARTY_PKG_DIR" .
 
   cat > "$ROOTFS_DIR/etc/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
@@ -267,6 +437,7 @@ write_cpio_list() {
     echo "dir /bin 0755 0 0"
     echo "file /bin/busybox $ROOTFS_DIR/bin/busybox 0755 0 0"
     echo "file /bin/login_prompt $ROOTFS_DIR/bin/login_prompt 0755 0 0"
+    echo "file /bin/party $ROOTFS_DIR/bin/party 0755 0 0"
     "$BUSYBOX_BIN" --list | while read -r applet; do
       [ "$applet" = "busybox" ] && continue
       echo "slink /bin/$applet busybox 0777 0 0"
@@ -280,6 +451,11 @@ write_cpio_list() {
     echo "dir /proc 0755 0 0"
     echo "dir /sys 0755 0 0"
     echo "dir /etc 0755 0 0"
+    echo "dir /var 0755 0 0"
+    echo "dir /var/lib 0755 0 0"
+    echo "dir /var/lib/party 0755 0 0"
+    echo "dir /var/lib/party/repo 0755 0 0"
+    echo "dir /var/lib/party/installed 0755 0 0"
     echo "dir /tmp 1777 0 0"
     echo "dir /root 0700 0 0"
     echo "dir /home 0755 0 0"
@@ -297,6 +473,7 @@ write_cpio_list() {
     echo "file /etc/resolv.conf $ROOTFS_DIR/etc/resolv.conf 0644 0 0"
     echo "file /etc/profile $ROOTFS_DIR/etc/profile 0644 0 0"
     echo "file /etc/udhcpc.script $ROOTFS_DIR/etc/udhcpc.script 0755 0 0"
+    echo "file /var/lib/party/repo/hello.tar $ROOTFS_DIR/var/lib/party/repo/hello.tar 0644 0 0"
     echo "file /init $ROOTFS_DIR/init 0755 0 0"
   } > "$CPIO_LIST"
 }
