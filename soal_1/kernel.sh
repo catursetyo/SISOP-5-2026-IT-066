@@ -2,21 +2,63 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD="$ROOT/build"
-OUT="$ROOT/osboot"
-KVER="6.1.1"
-LINUX="$BUILD/linux-$KVER"
+BUILD_DIR="$ROOT/build"
+OUT_DIR="$ROOT/osboot"
+KERNEL_VERSION="6.1.1"
+KERNEL_SHA256="a3e61377cf4435a9e2966b409a37a1056f6aaa59e561add9125a88e3c0971dfb"
+KERNEL_ARCHIVE="$BUILD_DIR/linux-$KERNEL_VERSION.tar.xz"
+LINUX_DIR="$BUILD_DIR/linux-$KERNEL_VERSION"
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1704067200}"
 
-mkdir -p "$BUILD" "$OUT"
+case "$SOURCE_DATE_EPOCH" in
+  ''|*[!0-9]*)
+    echo "[ERROR] SOURCE_DATE_EPOCH must be an integer Unix timestamp" >&2
+    exit 1
+    ;;
+esac
 
-cd "$BUILD"
+export SOURCE_DATE_EPOCH
+export KBUILD_BUILD_USER="${KBUILD_BUILD_USER:-farewell}"
+export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST:-party}"
+export KBUILD_BUILD_VERSION="${KBUILD_BUILD_VERSION:-1}"
+export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" '+%Y-%m-%d %H:%M:%S')}"
+export KCONFIG_NOTIMESTAMP=1
+export LC_ALL=C
+export TZ=UTC
+umask 022
 
-if [ ! -d "$LINUX" ]; then
-  wget -nc "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KVER.tar.xz"
-  tar -xf "linux-$KVER.tar.xz"
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "[ERROR] Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+mkdir -p "$BUILD_DIR" "$OUT_DIR"
+
+need_cmd sha256sum
+need_cmd wget
+need_cmd tar
+need_cmd make
+need_cmd gcc
+need_cmd date
+
+cd "$BUILD_DIR"
+
+if [ ! -f "$KERNEL_ARCHIVE" ]; then
+  echo "[INFO] Downloading Linux $KERNEL_VERSION..."
+  wget -O "$KERNEL_ARCHIVE" \
+    "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$KERNEL_VERSION.tar.xz"
 fi
 
-cd "$LINUX"
+echo "$KERNEL_SHA256  $KERNEL_ARCHIVE" | sha256sum -c -
+
+if [ ! -d "$LINUX_DIR" ]; then
+  echo "[INFO] Extracting Linux $KERNEL_VERSION..."
+  tar --delay-directory-restore -xf "$KERNEL_ARCHIVE"
+fi
+
+cd "$LINUX_DIR"
 
 if grep -Fq 'seq_printf(sf, "%s %u\n", dname, iocg->cfg_weight / WEIGHT_ONE);' block/blk-iocost.c; then
   sed -i \
@@ -25,7 +67,13 @@ if grep -Fq 'seq_printf(sf, "%s %u\n", dname, iocg->cfg_weight / WEIGHT_ONE);' b
     block/blk-iocost.c
 fi
 
-make defconfig
+if [ -f "$ROOT/.config" ]; then
+  echo "[INFO] Using tracked kernel config: $ROOT/.config"
+  cp "$ROOT/.config" .config
+else
+  echo "[INFO] No tracked .config found; creating defconfig baseline..."
+  make defconfig
+fi
 
 # for initramfs boot
 ./scripts/config --enable BLK_DEV_INITRD
@@ -48,6 +96,11 @@ make defconfig
 ./scripts/config --enable E1000
 
 ./scripts/config --enable FUSE_FS
+
+# keep kernel release/build metadata deterministic
+./scripts/config --set-str LOCALVERSION ""
+./scripts/config --disable LOCALVERSION_AUTO
+./scripts/config --set-str BUILD_SALT ""
 
 # avoid openSSL/certificate build error on modern Fedora
 ./scripts/config --disable MODULES
@@ -78,10 +131,20 @@ make olddefconfig
 
 echo "[INFO] Checking certificate/keyring-related configs..."
 grep -E 'WERROR|MODULE_SIG|SYSTEM_TRUSTED|SYSTEM_REVOCATION|SYSTEM_BLACKLIST|ASYMMETRIC|X509|PKCS7|KEYS|INTEGRITY|IMA|EVM' .config || true
+echo "[INFO] Reproducible kernel metadata:"
+echo "       KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP"
+echo "       KBUILD_BUILD_USER=$KBUILD_BUILD_USER"
+echo "       KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST"
 
 make CC="gcc -std=gnu11" HOSTCC="gcc -std=gnu11" -j"$(nproc)" bzImage
 
-cp arch/x86/boot/bzImage "$OUT/bzImage"
-cp .config "$ROOT/.config"
+cp arch/x86/boot/bzImage "$OUT_DIR/bzImage"
+touch -d "@$SOURCE_DATE_EPOCH" "$OUT_DIR/bzImage"
 
-echo "[OK] Kernel built: $OUT/bzImage"
+if [ "${UPDATE_CONFIG:-0}" = "1" ]; then
+  echo "[INFO] Updating tracked kernel config: $ROOT/.config"
+  cp .config "$ROOT/.config"
+  touch -d "@$SOURCE_DATE_EPOCH" "$ROOT/.config"
+fi
+
+echo "[OK] Kernel built: $OUT_DIR/bzImage"

@@ -11,8 +11,24 @@ LINUX_DIR="$BUILD_DIR/linux-$KERNEL_VERSION"
 GEN_INIT_CPIO="$LINUX_DIR/usr/gen_init_cpio"
 BUSYBOX_VERSION="1.36.1"
 BUSYBOX_ARCHIVE="$BUILD_DIR/busybox-$BUSYBOX_VERSION.tar.bz2"
+BUSYBOX_SHA256="b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314"
 BUSYBOX_DIR="$BUILD_DIR/busybox-$BUSYBOX_VERSION"
 BUSYBOX_BIN="$BUSYBOX_DIR/busybox"
+BUSYBOX_STAMP="$BUSYBOX_DIR/.farewell-repro-v1"
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1704067200}"
+
+case "$SOURCE_DATE_EPOCH" in
+  ''|*[!0-9]*)
+    echo "[ERROR] SOURCE_DATE_EPOCH must be an integer Unix timestamp" >&2
+    exit 1
+    ;;
+esac
+
+export SOURCE_DATE_EPOCH
+export KCONFIG_NOTIMESTAMP=1
+export LC_ALL=C
+export TZ=UTC
+umask 022
 
 mkdir -p "$BUILD_DIR" "$OUT_DIR"
 
@@ -24,7 +40,10 @@ need_cmd() {
 }
 
 download_busybox() {
+  need_cmd sha256sum
+
   if [ -f "$BUSYBOX_ARCHIVE" ]; then
+    echo "$BUSYBOX_SHA256  $BUSYBOX_ARCHIVE" | sha256sum -c -
     return
   fi
 
@@ -32,6 +51,7 @@ download_busybox() {
   echo "[INFO] Downloading BusyBox $BUSYBOX_VERSION..."
   wget -O "$BUSYBOX_ARCHIVE" \
     "https://busybox.net/downloads/busybox-$BUSYBOX_VERSION.tar.bz2"
+  echo "$BUSYBOX_SHA256  $BUSYBOX_ARCHIVE" | sha256sum -c -
 }
 
 extract_busybox() {
@@ -44,7 +64,7 @@ extract_busybox() {
 }
 
 build_busybox() {
-  if [ -x "$BUSYBOX_BIN" ] && ! ldd "$BUSYBOX_BIN" >/dev/null 2>&1; then
+  if [ -x "$BUSYBOX_BIN" ] && [ -f "$BUSYBOX_STAMP" ] && ! ldd "$BUSYBOX_BIN" >/dev/null 2>&1; then
     return
   fi
 
@@ -61,8 +81,63 @@ build_busybox() {
       -e 's/^CONFIG_FEATURE_TC_INGRESS=y/# CONFIG_FEATURE_TC_INGRESS is not set/' \
       -e 's/^CONFIG_WERROR=y/# CONFIG_WERROR is not set/' \
       .config
+    rm -f busybox
     make -j"$(nproc)"
+    touch -d "@$SOURCE_DATE_EPOCH" busybox .config
+    : > "$BUSYBOX_STAMP"
+    touch -d "@$SOURCE_DATE_EPOCH" "$BUSYBOX_STAMP"
   )
+}
+
+tar_repro() {
+  local archive="$1"
+  local source_dir="$2"
+
+  tar \
+    --sort=name \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    --mtime="@$SOURCE_DATE_EPOCH" \
+    --clamp-mtime \
+    -cf "$archive" \
+    -C "$source_dir" .
+}
+
+normalize_rootfs_mtime() {
+  find "$ROOTFS_DIR" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+}
+
+write_fuse_hello_source() {
+  "$ROOT/single.sh" --emit-fuse-source "$1"
+}
+
+build_fuse_demo() {
+  local out="$1"
+  local source="$BUILD_DIR/fuse_hello.c"
+  local cc_bin="${CC:-gcc}"
+  local common_flags=(
+    -O2
+    -Wall
+    -Wextra
+    -Wdate-time
+    -Werror=date-time
+    -fno-ident
+    "-ffile-prefix-map=$ROOT=."
+    "-fdebug-prefix-map=$ROOT=."
+    "-DFUSE_HELLO_EPOCH=$SOURCE_DATE_EPOCH"
+  )
+  local ld_flags=(-Wl,--build-id=none)
+
+  write_fuse_hello_source "$source"
+  need_cmd "$cc_bin"
+  if ! "$cc_bin" -static "${common_flags[@]}" "${ld_flags[@]}" -o "$out" "$source"; then
+    echo "[WARN] Static fuse_hello build failed; falling back to dynamic binary." >&2
+    "$cc_bin" "${common_flags[@]}" "${ld_flags[@]}" -o "$out" "$source"
+  fi
+
+  strip -s -R .comment -R .note.gnu.build-id "$out" 2>/dev/null || strip -s "$out" 2>/dev/null || true
+  touch -d "@$SOURCE_DATE_EPOCH" "$out"
 }
 
 ensure_gen_init_cpio() {
@@ -263,36 +338,12 @@ EOF_PARTY
 echo "Hello from a package installed by party."
 EOF_HELLO
   chmod 0755 "$PARTY_PKG_DIR/bin/hello"
-  tar --owner=0 --group=0 --numeric-owner -cf \
-    "$ROOTFS_DIR/var/lib/party/repo/hello.tar" \
-    -C "$PARTY_PKG_DIR" .
+  tar_repro "$ROOTFS_DIR/var/lib/party/repo/hello.tar" "$PARTY_PKG_DIR"
 
   PARTY_FASTFETCH_DIR="$BUILD_DIR/party-fastfetch"
   rm -rf "$PARTY_FASTFETCH_DIR"
-  FASTFETCH_BIN="$(command -v fastfetch || true)"
-  if [ -n "$FASTFETCH_BIN" ] && [ -x "$FASTFETCH_BIN" ] && command -v ldd >/dev/null 2>&1; then
-    mkdir -p "$PARTY_FASTFETCH_DIR/bin"
-    cp "$FASTFETCH_BIN" "$PARTY_FASTFETCH_DIR/bin/fastfetch"
-    ldd "$FASTFETCH_BIN" | while IFS= read -r dep; do
-      lib=""
-      set -- $dep
-      if [ "${2:-}" = "=>" ] && [ -n "${3:-}" ]; then
-        lib="$3"
-      elif [ -n "${1:-}" ]; then
-        lib="$1"
-      fi
-      case "$lib" in
-        /*) ;;
-        *) continue ;;
-      esac
-      [ -n "$lib" ] || continue
-      [ -f "$lib" ] || continue
-      mkdir -p "$PARTY_FASTFETCH_DIR$(dirname "$lib")"
-      cp -L "$lib" "$PARTY_FASTFETCH_DIR$lib"
-    done
-  else
-    mkdir -p "$PARTY_FASTFETCH_DIR/bin"
-    cat > "$PARTY_FASTFETCH_DIR/bin/fastfetch" <<'EOF_FASTFETCH'
+  mkdir -p "$PARTY_FASTFETCH_DIR/bin"
+  cat > "$PARTY_FASTFETCH_DIR/bin/fastfetch" <<'EOF_FASTFETCH'
 #!/bin/sh
 host="$(hostname 2>/dev/null || echo unknown)"
 kernel="$(uname -sr 2>/dev/null || echo unknown)"
@@ -320,23 +371,14 @@ Memory:       $mem_free available / $mem_total total
 Root FS:      ${root_use:-unknown}
 EOF_INFO
 EOF_FASTFETCH
-    chmod 0755 "$PARTY_FASTFETCH_DIR/bin/fastfetch"
-  fi
-  tar --owner=0 --group=0 --numeric-owner -cf \
-    "$ROOTFS_DIR/var/lib/party/repo/fastfetch.tar" \
-    -C "$PARTY_FASTFETCH_DIR" .
+  chmod 0755 "$PARTY_FASTFETCH_DIR/bin/fastfetch"
+  tar_repro "$ROOTFS_DIR/var/lib/party/repo/fastfetch.tar" "$PARTY_FASTFETCH_DIR"
 
   PARTY_FUSE_DIR="$BUILD_DIR/party-fuse"
   FUSE_DEMO_BIN="$BUILD_DIR/fuse_hello"
   rm -rf "$PARTY_FUSE_DIR"
   mkdir -p "$PARTY_FUSE_DIR/bin"
-  if [ ! -x "$FUSE_DEMO_BIN" ] || [ "$ROOT/fuse_hello.c" -nt "$FUSE_DEMO_BIN" ]; then
-    need_cmd gcc
-    if ! gcc -static -O2 -Wall -Wextra -o "$FUSE_DEMO_BIN" "$ROOT/fuse_hello.c"; then
-      gcc -O2 -Wall -Wextra -o "$FUSE_DEMO_BIN" "$ROOT/fuse_hello.c"
-    fi
-  fi
-  strip -s "$FUSE_DEMO_BIN" 2>/dev/null || true
+  build_fuse_demo "$FUSE_DEMO_BIN"
   cp "$FUSE_DEMO_BIN" "$PARTY_FUSE_DIR/bin/fuse_hello"
   if ldd "$FUSE_DEMO_BIN" > "$BUILD_DIR/fuse_hello.ldd" 2>/dev/null; then
     while IFS= read -r dep; do
@@ -362,9 +404,7 @@ EOF_FASTFETCH
 exec /bin/fuse_hello --test "${1:-/tmp/fuse-demo}"
 EOF_FUSE_TEST
   chmod 0755 "$PARTY_FUSE_DIR/bin/fuse_hello" "$PARTY_FUSE_DIR/bin/fuse-test"
-  tar --owner=0 --group=0 --numeric-owner -cf \
-    "$ROOTFS_DIR/var/lib/party/repo/fuse.tar" \
-    -C "$PARTY_FUSE_DIR" .
+  tar_repro "$ROOTFS_DIR/var/lib/party/repo/fuse.tar" "$PARTY_FUSE_DIR"
 
   cat > "$ROOTFS_DIR/etc/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
@@ -590,7 +630,9 @@ pack_rootfs() {
   need_cmd gzip
 
   echo "[INFO] Packing initramfs to $OUT_DIR/multi.gz..."
-  "$GEN_INIT_CPIO" "$CPIO_LIST" | gzip -9 > "$OUT_DIR/multi.gz"
+  normalize_rootfs_mtime
+  "$GEN_INIT_CPIO" -t "$SOURCE_DATE_EPOCH" "$CPIO_LIST" | gzip -n -9 > "$OUT_DIR/multi.gz"
+  touch -d "@$SOURCE_DATE_EPOCH" "$OUT_DIR/multi.gz"
 }
 
 download_busybox
