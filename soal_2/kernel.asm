@@ -26,6 +26,7 @@ _putInMemory:
     mov bp, sp
 
     push ds
+    push si
 
     mov ax, [bp+4]
     mov si, [bp+6]
@@ -34,6 +35,7 @@ _putInMemory:
     mov ds, ax
     mov [si], cl
 
+    pop si
     pop ds
 
     pop bp
@@ -41,7 +43,13 @@ _putInMemory:
 
 ; implement this
 _getChar:
+    push ds
+    push es
+
     mov ah, 0x00
     int 0x16
+
+    pop es
+    pop ds
     xor ah, ah
     ret

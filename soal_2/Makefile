@@ -8,7 +8,7 @@ bootloader:
 kernel:
 	nasm -f as86 kernel.asm -o kernel-asm.o
 	bcc -ansi -c kernel.c -o kernel.o
-	ld86 -o kernel.bin -d kernel.o kernel-asm.o
+	ld86 -o kernel.bin -d kernel-asm.o kernel.o
 	dd if=kernel.bin of=floppy.img bs=512 seek=1 conv=notrunc
 
 build: prepare bootloader kernel

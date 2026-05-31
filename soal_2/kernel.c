@@ -9,6 +9,12 @@ void printChar(char c);
 void printString(char *s);
 void readString(char *buf);
 int strcmp(char *a, char *b);
+int isCommand(char *cmd, char *name);
+void skipSpaces(char *s, int *idx);
+int readIntAt(char *s, int *idx, int *out);
+int parseTwoArgs(char *cmd, int start, int *a, int *b);
+void intToString(int n, char *out);
+int factorial(int n);
 
 /*
  * Final Challenge
@@ -153,9 +159,163 @@ int strcmp(char *a, char *b) {
     return 0;
 }
 
+int isCommand(char *cmd, char *name) {
+    int i;
+
+    i = 0;
+    while (name[i] != 0) {
+        if (cmd[i] != name[i]) {
+            return 0;
+        }
+        i++;
+    }
+
+    if (cmd[i] == 0 || cmd[i] == ' ') {
+        return 1;
+    }
+
+    return 0;
+}
+
+void skipSpaces(char *s, int *idx) {
+    while (s[*idx] == ' ') {
+        *idx = *idx + 1;
+    }
+}
+
+int readIntAt(char *s, int *idx, int *out) {
+    int sign;
+    int value;
+    int found;
+
+    sign = 1;
+    value = 0;
+    found = 0;
+
+    skipSpaces(s, idx);
+
+    if (s[*idx] == '-') {
+        sign = -1;
+        *idx = *idx + 1;
+    } else if (s[*idx] == '+') {
+        *idx = *idx + 1;
+    }
+
+    while (s[*idx] >= '0' && s[*idx] <= '9') {
+        value = (value * 10) + (s[*idx] - '0');
+        found = 1;
+        *idx = *idx + 1;
+    }
+
+    if (!found) {
+        return 0;
+    }
+
+    *out = value * sign;
+    return 1;
+}
+
+int parseTwoArgs(char *cmd, int start, int *a, int *b) {
+    int idx;
+
+    idx = start;
+
+    if (!readIntAt(cmd, &idx, a)) {
+        return 0;
+    }
+
+    if (!readIntAt(cmd, &idx, b)) {
+        return 0;
+    }
+
+    skipSpaces(cmd, &idx);
+    if (cmd[idx] != 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
+void intToString(int n, char *out) {
+    int values[5];
+    int i;
+    int j;
+    int digit;
+    int started;
+
+    values[0] = 10000;
+    values[1] = 1000;
+    values[2] = 100;
+    values[3] = 10;
+    values[4] = 1;
+
+    if (n == 0) {
+        out[0] = '0';
+        out[1] = 0;
+        return;
+    }
+
+    j = 0;
+    if (n < 0) {
+        if (n == -32767 - 1) {
+            out[0] = '-';
+            out[1] = '3';
+            out[2] = '2';
+            out[3] = '7';
+            out[4] = '6';
+            out[5] = '8';
+            out[6] = 0;
+            return;
+        }
+
+        out[j] = '-';
+        j++;
+        n = -n;
+    }
+
+    started = 0;
+    i = 0;
+    while (i < 5) {
+        digit = 0;
+        while (n >= values[i]) {
+            n = n - values[i];
+            digit++;
+        }
+
+        if (digit > 0 || started || values[i] == 1) {
+            out[j] = digit + '0';
+            j++;
+            started = 1;
+        }
+
+        i++;
+    }
+
+    out[j] = 0;
+}
+
+int factorial(int n) {
+    int i;
+    int result;
+
+    result = 1;
+    i = 2;
+    while (i <= n) {
+        result = result * i;
+        i++;
+    }
+
+    return result;
+}
+
 void main() {
 
     char cmd[64];
+    char number[16];
+    int a;
+    int b;
+    int result;
+    int idx;
 
     clearScreen();
 
@@ -176,8 +336,38 @@ void main() {
 
         if (strcmp(cmd, "check")) {
             printString("ok");
+        } else if (isCommand(cmd, "add")) {
+            if (parseTwoArgs(cmd, 3, &a, &b)) {
+                result = a + b;
+                intToString(result, number);
+                printString(number);
+            } else {
+                printString("usage: add <a> <b>");
+            }
+        } else if (isCommand(cmd, "sub")) {
+            if (parseTwoArgs(cmd, 3, &a, &b)) {
+                result = a - b;
+                intToString(result, number);
+                printString(number);
+            } else {
+                printString("usage: sub <a> <b>");
+            }
+        } else if (isCommand(cmd, "fac")) {
+            idx = 3;
+            if (readIntAt(cmd, &idx, &a)) {
+                skipSpaces(cmd, &idx);
+                if (cmd[idx] == 0 && a >= 0 && a <= 7) {
+                    result = factorial(a);
+                    intToString(result, number);
+                    printString(number);
+                } else {
+                    printString("know your limit little bro.");
+                }
+            } else {
+                printString("usage: fac <n>");
+            }
         } else if (strcmp(cmd, "help")) {
-            printString("check help about");
+            printString("check add sub fac help about");
         } else if (strcmp(cmd, "about")) {
             printString("Assistant's Last Gift");
         } else if (strcmp(cmd, "")) {
