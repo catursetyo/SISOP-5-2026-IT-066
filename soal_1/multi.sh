@@ -267,6 +267,65 @@ EOF_HELLO
     "$ROOTFS_DIR/var/lib/party/repo/hello.tar" \
     -C "$PARTY_PKG_DIR" .
 
+  PARTY_FASTFETCH_DIR="$BUILD_DIR/party-fastfetch"
+  rm -rf "$PARTY_FASTFETCH_DIR"
+  FASTFETCH_BIN="$(command -v fastfetch || true)"
+  if [ -n "$FASTFETCH_BIN" ] && [ -x "$FASTFETCH_BIN" ] && command -v ldd >/dev/null 2>&1; then
+    mkdir -p "$PARTY_FASTFETCH_DIR/bin"
+    cp "$FASTFETCH_BIN" "$PARTY_FASTFETCH_DIR/bin/fastfetch"
+    ldd "$FASTFETCH_BIN" | while IFS= read -r dep; do
+      lib=""
+      set -- $dep
+      if [ "${2:-}" = "=>" ] && [ -n "${3:-}" ]; then
+        lib="$3"
+      elif [ -n "${1:-}" ]; then
+        lib="$1"
+      fi
+      case "$lib" in
+        /*) ;;
+        *) continue ;;
+      esac
+      [ -n "$lib" ] || continue
+      [ -f "$lib" ] || continue
+      mkdir -p "$PARTY_FASTFETCH_DIR$(dirname "$lib")"
+      cp -L "$lib" "$PARTY_FASTFETCH_DIR$lib"
+    done
+  else
+    mkdir -p "$PARTY_FASTFETCH_DIR/bin"
+    cat > "$PARTY_FASTFETCH_DIR/bin/fastfetch" <<'EOF_FASTFETCH'
+#!/bin/sh
+host="$(hostname 2>/dev/null || echo unknown)"
+kernel="$(uname -sr 2>/dev/null || echo unknown)"
+arch="$(uname -m 2>/dev/null || echo unknown)"
+uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
+mem_total="$(awk '/MemTotal/ {print int($2/1024) " MiB"}' /proc/meminfo 2>/dev/null || echo unknown)"
+mem_free="$(awk '/MemAvailable/ {print int($2/1024) " MiB"}' /proc/meminfo 2>/dev/null || echo unknown)"
+user="$(whoami 2>/dev/null || id -un 2>/dev/null || echo user)"
+root_use="$(df -h / 2>/dev/null | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"}')"
+
+cat <<EOF_INFO
+    ______                    ____             __
+   / ____/___  ________     / __ \____ ______/ /___  __
+  / /_  / __ \/ ___/ _ \   / /_/ / __ \`/ ___/ __/ / / /
+ / __/ / /_/ / /  /  __/  / ____/ /_/ / /  / /_/ /_/ /
+/_/    \____/_/   \___/  /_/    \__,_/_/   \__/\__, /
+                                               /____/
+User:         $user@$host
+OS:           Farewell Party OS
+Kernel:       $kernel
+Architecture: $arch
+Shell:        ${SHELL:-/bin/sh}
+Uptime:       ${uptime_s}s
+Memory:       $mem_free available / $mem_total total
+Root FS:      ${root_use:-unknown}
+EOF_INFO
+EOF_FASTFETCH
+    chmod 0755 "$PARTY_FASTFETCH_DIR/bin/fastfetch"
+  fi
+  tar --owner=0 --group=0 --numeric-owner -cf \
+    "$ROOTFS_DIR/var/lib/party/repo/fastfetch.tar" \
+    -C "$PARTY_FASTFETCH_DIR" .
+
   cat > "$ROOTFS_DIR/etc/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
 henn:x:1001:1001:henn:/home/henn:/bin/sh
@@ -308,6 +367,12 @@ tmpfs   /tmp   tmpfs    mode=1777  0  0
 EOF_FSTAB
 
   echo "farewell-multi" > "$ROOTFS_DIR/etc/hostname"
+  cat > "$ROOTFS_DIR/etc/os-release" <<'EOF_OS_RELEASE'
+NAME="Farewell Party OS"
+ID=farewell
+PRETTY_NAME="Farewell Party OS"
+VERSION_ID="1"
+EOF_OS_RELEASE
   echo "nameserver 10.0.2.3" > "$ROOTFS_DIR/etc/resolv.conf"
 
   cat > "$ROOTFS_DIR/etc/profile" <<'EOF_PROFILE'
@@ -470,10 +535,12 @@ write_cpio_list() {
     echo "file /etc/securetty $ROOTFS_DIR/etc/securetty 0600 0 0"
     echo "file /etc/fstab $ROOTFS_DIR/etc/fstab 0644 0 0"
     echo "file /etc/hostname $ROOTFS_DIR/etc/hostname 0644 0 0"
+    echo "file /etc/os-release $ROOTFS_DIR/etc/os-release 0644 0 0"
     echo "file /etc/resolv.conf $ROOTFS_DIR/etc/resolv.conf 0644 0 0"
     echo "file /etc/profile $ROOTFS_DIR/etc/profile 0644 0 0"
     echo "file /etc/udhcpc.script $ROOTFS_DIR/etc/udhcpc.script 0755 0 0"
     echo "file /var/lib/party/repo/hello.tar $ROOTFS_DIR/var/lib/party/repo/hello.tar 0644 0 0"
+    echo "file /var/lib/party/repo/fastfetch.tar $ROOTFS_DIR/var/lib/party/repo/fastfetch.tar 0644 0 0"
     echo "file /init $ROOTFS_DIR/init 0755 0 0"
   } > "$CPIO_LIST"
 }
