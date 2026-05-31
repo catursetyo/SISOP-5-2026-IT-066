@@ -326,6 +326,46 @@ EOF_FASTFETCH
     "$ROOTFS_DIR/var/lib/party/repo/fastfetch.tar" \
     -C "$PARTY_FASTFETCH_DIR" .
 
+  PARTY_FUSE_DIR="$BUILD_DIR/party-fuse"
+  FUSE_DEMO_BIN="$BUILD_DIR/fuse_hello"
+  rm -rf "$PARTY_FUSE_DIR"
+  mkdir -p "$PARTY_FUSE_DIR/bin"
+  if [ ! -x "$FUSE_DEMO_BIN" ] || [ "$ROOT/fuse_hello.c" -nt "$FUSE_DEMO_BIN" ]; then
+    need_cmd gcc
+    if ! gcc -static -O2 -Wall -Wextra -o "$FUSE_DEMO_BIN" "$ROOT/fuse_hello.c"; then
+      gcc -O2 -Wall -Wextra -o "$FUSE_DEMO_BIN" "$ROOT/fuse_hello.c"
+    fi
+  fi
+  strip -s "$FUSE_DEMO_BIN" 2>/dev/null || true
+  cp "$FUSE_DEMO_BIN" "$PARTY_FUSE_DIR/bin/fuse_hello"
+  if ldd "$FUSE_DEMO_BIN" > "$BUILD_DIR/fuse_hello.ldd" 2>/dev/null; then
+    while IFS= read -r dep; do
+      lib=""
+      set -- $dep
+      if [ "${2:-}" = "=>" ] && [ -n "${3:-}" ]; then
+        lib="$3"
+      elif [ -n "${1:-}" ]; then
+        lib="$1"
+      fi
+      case "$lib" in
+        /*) ;;
+        *) continue ;;
+      esac
+      [ -n "$lib" ] || continue
+      [ -f "$lib" ] || continue
+      mkdir -p "$PARTY_FUSE_DIR$(dirname "$lib")"
+      cp -L "$lib" "$PARTY_FUSE_DIR$lib"
+    done < "$BUILD_DIR/fuse_hello.ldd"
+  fi
+  cat > "$PARTY_FUSE_DIR/bin/fuse-test" <<'EOF_FUSE_TEST'
+#!/bin/sh
+exec /bin/fuse_hello --test "${1:-/tmp/fuse-demo}"
+EOF_FUSE_TEST
+  chmod 0755 "$PARTY_FUSE_DIR/bin/fuse_hello" "$PARTY_FUSE_DIR/bin/fuse-test"
+  tar --owner=0 --group=0 --numeric-owner -cf \
+    "$ROOTFS_DIR/var/lib/party/repo/fuse.tar" \
+    -C "$PARTY_FUSE_DIR" .
+
   cat > "$ROOTFS_DIR/etc/passwd" <<'EOF_PASSWD'
 root:x:0:0:root:/root:/bin/sh
 henn:x:1001:1001:henn:/home/henn:/bin/sh
@@ -541,6 +581,7 @@ write_cpio_list() {
     echo "file /etc/udhcpc.script $ROOTFS_DIR/etc/udhcpc.script 0755 0 0"
     echo "file /var/lib/party/repo/hello.tar $ROOTFS_DIR/var/lib/party/repo/hello.tar 0644 0 0"
     echo "file /var/lib/party/repo/fastfetch.tar $ROOTFS_DIR/var/lib/party/repo/fastfetch.tar 0644 0 0"
+    echo "file /var/lib/party/repo/fuse.tar $ROOTFS_DIR/var/lib/party/repo/fuse.tar 0644 0 0"
     echo "file /init $ROOTFS_DIR/init 0755 0 0"
   } > "$CPIO_LIST"
 }
