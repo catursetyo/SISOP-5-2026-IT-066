@@ -1,5 +1,6 @@
 build/
-osboot/
+
+patches/
 
 # Build artifacts
 build/
@@ -11,3 +12,14 @@ build/
 .tmp_versions/
 Module.symvers
 modules.order
+
+single.gz
+
+soal_2/floppy.img
+soal_2/*.bin
+soal_2/bochslog.txt
+soal_2/*.log
+soal_2/__MACOSX/
+soal_2/template.zip
+soal_2/template/
+soal_2/build
