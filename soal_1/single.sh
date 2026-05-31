@@ -117,6 +117,27 @@ tmpfs /tmp   tmpfs    mode=1777  0  0
 EOF_FSTAB
 
   echo "farewell-single" > "$ROOTFS_DIR/etc/hostname"
+  echo "nameserver 10.0.2.3" > "$ROOTFS_DIR/etc/resolv.conf"
+
+  cat > "$ROOTFS_DIR/etc/udhcpc.script" <<'EOF_UDHCPC'
+#!/bin/sh
+case "$1" in
+  deconfig)
+    ifconfig "$interface" 0.0.0.0 2>/dev/null || true
+    ;;
+  bound|renew)
+    ifconfig "$interface" "$ip" netmask "$subnet"
+    if [ -n "$router" ]; then
+      route del default 2>/dev/null || true
+      route add default gw "$router"
+    fi
+    : > /etc/resolv.conf
+    for ns in $dns; do
+      echo "nameserver $ns" >> /etc/resolv.conf
+    done
+    ;;
+esac
+EOF_UDHCPC
 
   cat > "$ROOTFS_DIR/init" <<'EOF_INIT'
 #!/bin/sh
@@ -135,6 +156,11 @@ mount -t tmpfs -o mode=1777 tmpfs /tmp 2>/dev/null || chmod 1777 /tmp
 
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
+
+hostname -F /etc/hostname 2>/dev/null || hostname farewell-single
+ifconfig lo up 2>/dev/null || true
+ifconfig eth0 up 2>/dev/null || true
+udhcpc -i eth0 -q -n -s /etc/udhcpc.script >/dev/null 2>&1 || true
 
 clear 2>/dev/null || true
 cat <<'EOF_BANNER'
@@ -181,6 +207,7 @@ while true; do
 done
 EOF_INIT
   chmod 0755 "$ROOTFS_DIR/init"
+  chmod 0755 "$ROOTFS_DIR/etc/udhcpc.script"
 
   mknod -m 600 "$ROOTFS_DIR/dev/console" c 5 1 2>/dev/null || true
   mknod -m 666 "$ROOTFS_DIR/dev/null" c 1 3 2>/dev/null || true

@@ -239,7 +239,7 @@ mount -t tmpfs -o mode=1777 tmpfs /tmp 2>/dev/null || chmod 1777 /tmp
 hostname -F /etc/hostname 2>/dev/null || hostname farewell-multi
 ifconfig lo up 2>/dev/null || true
 ifconfig eth0 up 2>/dev/null || true
-udhcpc -i eth0 -q -n -s /etc/udhcpc.script >/dev/null 2>&1 &
+udhcpc -i eth0 -q -n -s /etc/udhcpc.script >/dev/null 2>&1 || true
 
 while true; do
   setsid cttyhack /bin/login_prompt < /dev/ttyS0 > /dev/ttyS0 2>&1
