@@ -526,8 +526,10 @@ void main() {
             } else {
                 printString("usage: triangle <1..20>");
             }
+        } else if (strcmp(cmd, "clear")) {
+            clearScreen();
         } else if (strcmp(cmd, "help")) {
-            printString("check add sub fac season triangle help about");
+            printString("check add sub fac season triangle clear about");
         } else if (strcmp(cmd, "about")) {
             printString("Assistant's Last Gift");
         } else if (strcmp(cmd, "")) {
