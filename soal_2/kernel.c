@@ -21,6 +21,7 @@ int appendDigit(char *out, int pos, int digit);
 void intToString(int n, char *out);
 int factorial(int n);
 int setSeason(char *cmd);
+void printTriangle(int n);
 
 /*
  * Final Challenge
@@ -425,6 +426,26 @@ int setSeason(char *cmd) {
     return 0;
 }
 
+void printTriangle(int n) {
+    int row;
+    int col;
+
+    row = 1;
+    while (row <= n) {
+        col = 0;
+        while (col < row) {
+            printChar('x');
+            col++;
+        }
+
+        if (row < n) {
+            newline();
+        }
+
+        row++;
+    }
+}
+
 void main() {
 
     char cmd[64];
@@ -492,8 +513,21 @@ void main() {
             if (!setSeason(cmd)) {
                 printString("usage: season <winter|spring|summer|fall|radiant>");
             }
+        } else if (isCommand(cmd, "triangle")) {
+            idx = parseNumberAt(cmd, 8);
+            if (idx >= 0) {
+                a = parsedNumber;
+                idx = skipSpacesAt(cmd, idx);
+                if (cmd[idx] == 0 && a > 0 && a <= 20) {
+                    printTriangle(a);
+                } else {
+                    printString("usage: triangle <1..20>");
+                }
+            } else {
+                printString("usage: triangle <1..20>");
+            }
         } else if (strcmp(cmd, "help")) {
-            printString("check add sub fac season help about");
+            printString("check add sub fac season triangle help about");
         } else if (strcmp(cmd, "about")) {
             printString("Assistant's Last Gift");
         } else if (strcmp(cmd, "")) {
