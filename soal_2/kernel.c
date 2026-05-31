@@ -14,11 +14,13 @@ void readString(char *buf);
 int strcmp(char *a, char *b);
 int isCommand(char *cmd, char *name);
 int skipSpacesAt(char *s, int idx);
+int matchWordAt(char *s, int idx, char *word);
 int parseNumberAt(char *s, int idx);
 int parseTwoArgs(char *cmd, int start);
 int appendDigit(char *out, int pos, int digit);
 void intToString(int n, char *out);
 int factorial(int n);
+int setSeason(char *cmd);
 
 /*
  * Final Challenge
@@ -187,6 +189,27 @@ int skipSpacesAt(char *s, int idx) {
     }
 
     return idx;
+}
+
+int matchWordAt(char *s, int idx, char *word) {
+    int i;
+
+    idx = skipSpacesAt(s, idx);
+    i = 0;
+    while (word[i] != 0) {
+        if (s[idx + i] != word[i]) {
+            return 0;
+        }
+        i++;
+    }
+
+    idx = idx + i;
+    idx = skipSpacesAt(s, idx);
+    if (s[idx] == 0) {
+        return 1;
+    }
+
+    return 0;
 }
 
 int parseNumberAt(char *s, int idx) {
@@ -368,6 +391,40 @@ int factorial(int n) {
     return result;
 }
 
+int setSeason(char *cmd) {
+    if (matchWordAt(cmd, 6, "winter")) {
+        color = 0x0B;
+        printString("winter mode");
+        return 1;
+    }
+
+    if (matchWordAt(cmd, 6, "spring")) {
+        color = 0x0A;
+        printString("spring mode");
+        return 1;
+    }
+
+    if (matchWordAt(cmd, 6, "summer")) {
+        color = 0x0E;
+        printString("summer mode");
+        return 1;
+    }
+
+    if (matchWordAt(cmd, 6, "fall")) {
+        color = 0x06;
+        printString("fall mode");
+        return 1;
+    }
+
+    if (matchWordAt(cmd, 6, "radiant")) {
+        color = 0x0D;
+        printString("radiant mode");
+        return 1;
+    }
+
+    return 0;
+}
+
 void main() {
 
     char cmd[64];
@@ -431,8 +488,12 @@ void main() {
             } else {
                 printString("usage: fac <n>");
             }
+        } else if (isCommand(cmd, "season")) {
+            if (!setSeason(cmd)) {
+                printString("usage: season <winter|spring|summer|fall|radiant>");
+            }
         } else if (strcmp(cmd, "help")) {
-            printString("check add sub fac help about");
+            printString("check add sub fac season help about");
         } else if (strcmp(cmd, "about")) {
             printString("Assistant's Last Gift");
         } else if (strcmp(cmd, "")) {
