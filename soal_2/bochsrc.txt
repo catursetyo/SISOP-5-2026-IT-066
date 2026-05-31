@@ -1,0 +1,8 @@
+megs: 32
+romimage: file=/usr/share/bochs/BIOS-bochs-latest
+vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest.bin
+boot: floppy
+floppya: 1_44=floppy.img, status=inserted
+log: bochslog.txt
+mouse: enabled=0
+display_library: sdl2
