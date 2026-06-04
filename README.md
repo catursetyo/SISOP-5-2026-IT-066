@@ -40,8 +40,6 @@
     `-- kernel.c
 ```
 
-> **Note:** File `AGENTS.md`, `AGENTS2.md`, `CONTEXT.md`, dan `CONTEXT2.md` digunakan sebagai bahan/konteks pengerjaan. File hasil build utama untuk Soal 1 berada di [soal_1/osboot](soal_1/osboot), sedangkan file sumber utama Soal 2 berada di [soal_2](soal_2).
-
 ---
 
 ## Pembahasan Soal
