@@ -11,10 +11,6 @@
 
 ```text
 .
-|-- AGENTS.md
-|-- AGENTS2.md
-|-- CONTEXT.md
-|-- CONTEXT2.md
 |-- README.md
 |-- soal_1/
 |   |-- .config
